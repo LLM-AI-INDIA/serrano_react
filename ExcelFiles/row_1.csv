@@ -1,0 +1,6 @@
+﻿Name of the youth,Race/Ethnicity,Medi-Cal ID Number,Residential Address,Telephone,Medi-Cal health plan assigned,Screenings,Clinical Assessments,Chronic Conditions,Prescribed Medications,Treatment History ,Primary physician contacts,Emergency contacts,Health Screenings,Health Assessments
+John Doe,Hispanic/Latino,1234567890,"123 Main Street, Los Angeles, CA 90001",(555) 123-4567,Blue Shield of California,"Depression screening, Substance abuse screening","General health assessment, Psychological evaluation","Asthma, Diabetes","Metformin, Albuterol Inhaler","Mental health: Anxiety therapy, Cognitive behavioral therapy
+Physical health: Regular check-ups, Physical therapy for back pain
+Substance use: Alcohol counseling","Dr. Sarah Smith, General Practitioner, (555) 987-6543
+Dr. Michael Johnson, Psychiatrist, (555) 234-5678","Jane Doe (Mother), (555) 876-5432
+Mark Doe (Father), (555) 345-6789","Depression screening, Substance abuse screening","General health assessment, Psychological evaluation"
