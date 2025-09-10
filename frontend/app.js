@@ -513,6 +513,16 @@ function ReentryCarePlanUI() {
         setError("Please select a correct profile from the list.");
         return;
     }
+    
+    // Determine final candidate name to send to backend
+    let finalCandidateForBackend;
+    if (candidateProfiles.length > 0 && selectedProfile) {
+        // Send the full formatted profile string if profile was selected
+        finalCandidateForBackend = candidateName; // This contains the formatted string
+    } else {
+        // Send original user input if no profiles found
+        finalCandidateForBackend = finalCandidateName;
+    }
 
     try {
       setLoading(true);
@@ -552,8 +562,7 @@ function ReentryCarePlanUI() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           selected_fields: selectedFields, 
-          candidate_name: finalCandidateName,
-          selected_profile: selectedProfile
+          candidate_name: finalCandidateForBackend
         }),
       });
 
@@ -573,7 +582,7 @@ function ReentryCarePlanUI() {
       a.remove();
       window.URL.revokeObjectURL(url);
 
-      setSuccess(`Successfully generated ${step} document for ${finalCandidateName}!`);
+      setSuccess(`Successfully generated ${step} document for ${finalCandidateForBackend}!`);
       
     } catch (err) {
       console.error("Generation error:", err);

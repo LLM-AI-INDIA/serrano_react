@@ -272,22 +272,27 @@ def force_document_font(doc, name="Century Gothic"):
 # -------------------------------------------------------------------------
 
 
-def generate_reentry_care_plan(selected_fields, person_input, app_option):
-        
-
-    text = "John Doe — Medical ID-5952280034 | Telephone Number- (555) 271-3237 | Residential Address- 134 Brown St, Los Angeles, CA 90063"
-
-    # Regex patterns
+def generate_reentry_care_plan(selected_fields, person_input):
+    print(f"🔍 Parsing person_input: '{person_input}'")
+    
+    # Regex patterns to extract name and medical ID from formatted string
     name_pattern = r"^(.*?)\s+—"
     medical_id_pattern = r"Medical ID-(\d+)"
 
-    # Extract values
-    name_match = re.search(name_pattern, text)
-    medical_id_match = re.search(medical_id_pattern, text)
+    # Extract values from person_input
+    name_match = re.search(name_pattern, person_input)
+    medical_id_match = re.search(medical_id_pattern, person_input)
 
     if name_match and medical_id_match:
         name = name_match.group(1)
         medical_id = medical_id_match.group(1)
+        print(f"📊 EXTRACTED: name='{name}', medical_id='{medical_id}'")
+    else:
+        # If no formatted string, use the entire input as name
+        name = person_input
+        medical_id = None
+        print(f"📊 NO FORMATTING DETECTED: using name='{name}', medical_id=None")
+        
     try:
         selected_fields = normalize_selected_fields(selected_fields)
 
@@ -323,7 +328,7 @@ def generate_reentry_care_plan(selected_fields, person_input, app_option):
         merged_dict.pop("id", None)
 
         # ✅ Load Template instead of starting fresh
-        doc = Document("D:\Application\data\Template.docx")
+        doc = Document("data/Template.docx")
 
         # Title
         doc.add_paragraph("")
@@ -444,6 +449,6 @@ conn = pymysql.connect(**DB_CONFIG)
 cursor = conn.cursor()
 cursor.execute("SELECT id FROM SocialEconomicLogistics_backup LIMIT 3")
 rows = cursor.fetchall()
-print("✅ rows:", rows)
+print("ROWS:", rows)
 cursor.close()
 conn.close()

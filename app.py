@@ -94,7 +94,6 @@ def generate_reentry_endpoint():
         print(f"📥 INPUT: {data}")
         selected_fields = data.get('selected_fields', [])
         candidate_name = data.get('candidate_name', '')
-        selected_profile = data.get('selected_profile', '')
         
         if not candidate_name:
             print("❌ ERROR: No candidate name provided")
@@ -106,17 +105,16 @@ def generate_reentry_endpoint():
         
         print(f"🏗️ GENERATING Reentry Care Plan for '{candidate_name}'")
         print(f"📋 SELECTED FIELDS ({len(selected_fields)}): {selected_fields}")
-        if selected_profile:
-            print(f"👤 SELECTED PROFILE: {selected_profile}")
         
         # Call your existing reentry function
         print("🔧 CALLING generate_reentry_care_plan()...")
         doc_io = generate_reentry_care_plan(selected_fields, candidate_name)
-        print("📄 DOCUMENT generated successfully")
         
         if doc_io is None:
             print("❌ ERROR: Document generation failed")
             return jsonify({'error': 'Failed to generate care plan'}), 500
+            
+        print("📄 DOCUMENT generated successfully")
         
         # Save the document to a file for download
         output_path = "data/reentry_output.docx"
