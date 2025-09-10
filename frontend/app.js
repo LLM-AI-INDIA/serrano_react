@@ -661,11 +661,19 @@ function ReentryCarePlanUI() {
                 <label className="mb-2 block text-sm font-medium text-gray-700">Candidate</label>
                 <CandidateSelect list={candidatePool} value={candidateName} onChange={setCandidateName} />
               </div>
-              {candidateName.trim() && candidateProfiles.length > 1 && (
+              {candidateName.trim() && (candidateProfiles.length > 1 || loadingProfiles) && (
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700">
-                    Select Correct Profile ({candidateProfiles.length} found)
-                    {loadingProfiles && <span className="text-xs text-gray-500 ml-1">(Loading...)</span>}
+                    Select Correct Profile
+                    {loadingProfiles && (
+                      <span className="text-xs text-blue-600 ml-1 inline-flex items-center gap-1">
+                        (<svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>searching...)
+                      </span>
+                    )}
+                    {!loadingProfiles && candidateProfiles.length > 1 && <span className="text-xs text-gray-600 ml-1">({candidateProfiles.length} found)</span>}
                   </label>
                   <select
                     value={selectedProfile}
@@ -673,8 +681,10 @@ function ReentryCarePlanUI() {
                     disabled={loadingProfiles}
                     className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-800 shadow focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   >
-                    <option value="">Choose profile...</option>
-                    {candidateProfiles.map((profile, index) => (
+                    <option value="">
+                      {loadingProfiles ? "Searching profiles..." : "Choose profile..."}
+                    </option>
+                    {!loadingProfiles && candidateProfiles.map((profile, index) => (
                       <option key={index} value={profile.medical_id}>
                         {profile.display_text}
                       </option>
