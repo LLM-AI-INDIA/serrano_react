@@ -17,6 +17,159 @@ from docx.oxml.shared import OxmlElement
 from docx.oxml.ns import qn
 from dotenv import load_dotenv
 load_dotenv()
+import re
+
+
+
+CANON_MAP = {
+    # identifiers
+    "Medi-Cal ID Number": "Medical ID Number",
+    "medical_id_number": "Medical ID Number",
+    "youth_name": "Name of the youth",
+
+    # dates / appointments
+    "actual_release_date": "Actual release date",
+    "scheduled_appointments": "Scheduled Appointments",
+    "court_dates": "Court dates",
+
+    # social/economic
+    "income_and_benefits": "Income and benefits",
+    "food_and_clothing": "Food & Clothing",
+    "identification_documents": "Identification documents",
+    "life_skills": "Life skills",
+    "family_and_children": "Family and children",
+    "service_referrals": "Service referrals",
+    "home_modifications": "Home Modifications",
+    "durable_medical_equipment": "Durable Medical Equipment",
+    "Screenings": "Screenings",
+
+    # 🚀 missing fields
+    "housing": "Housing",
+    "employment": "Employment",
+    "transportation": "Transportation",
+    "Treatment History": "Treatment History",
+    "Treatment History (mental health, physical health, substance use)": "Treatment History",
+
+    # ✅ extra 9 fields from screenshot
+    "Race/Ethnicity": "Race/Ethnicity",
+    "Residential Address": "Residential Address",
+    "Telephone": "Telephone",
+    "Medi-Cal health plan assigned": "Medi-Cal health plan assigned",
+    "Health Screenings": "Health Screenings",
+    "Health Assessments": "Health Assessments",
+    "Chronic Conditions": "Chronic Conditions",
+    "Prescribed Medications": "Prescribed Medications",
+    "Primary physician contacts": "Primary physician contacts",
+    "Clinical Assessments": "Clinical Assessments",
+    "Emergency contacts": "Emergency contacts"
+}
+
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename known variants to canonical column names."""
+    if df is None or df.empty:
+        return df
+    rename_map = {k: v for k, v in CANON_MAP.items() if k in df.columns}
+    return df.rename(columns=rename_map)
+
+def normalize_selected_fields(selected_fields):
+    """Map UI labels to canonical where needed (e.g., Medi-Cal -> Medical)."""
+    return [CANON_MAP.get(f, f) for f in selected_fields]
+
+def get_case_notes(sql_dict, bq_dict, dict_representation):
+    """Fetch Case Notes with fallback SQL → BQ → Excel."""
+    possible_keys = ["Case Notes", "case_notes", "casenotes"]
+
+    for key in possible_keys:
+        if sql_dict.get(key):
+            return sql_dict[key]
+        if bq_dict.get(key):
+            return bq_dict[key]
+        if dict_representation.get(key):
+            return dict_representation[key]
+
+    return "No case notes available."
+
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename known variants to canonical column names."""
+    if df is None or df.empty:
+        return df
+    rename_map = {k: v for k, v in CANON_MAP.items() if k in df.columns}
+    return df.rename(columns=rename_map)
+
+def normalize_selected_fields(selected_fields):
+    """Map UI labels to canonical where needed (e.g., Medi-Cal -> Medical)."""
+    return [CANON_MAP.get(f, f) for f in selected_fields]
+
+def get_candidates_by_name(person_input: str):
+    """
+    Searches Excel, SQL, and BigQuery for all people with the same name.
+    Returns a de-duplicated list of formatted strings:
+    "Name — Medical ID-XXXX | Telephone Number- XXX | Residential Address- XXX"
+    """
+    candidates = []
+
+    # Excel
+    try:
+        file_data = pd.read_excel("ExcelFiles/reentry5.xlsx")
+        file_data = normalize_columns(file_data)
+
+        if "Name of the youth" in file_data.columns:
+            matches = file_data[
+                file_data["Name of the youth"].astype(str).str.strip().str.lower()
+                == person_input.strip().lower()
+            ]
+            for _, row in matches.iterrows():
+                name = str(row.get("Name of the youth") or "").strip()
+                mid = str(row.get("Medi-Cal ID Number") or "").strip()
+                phone = str(row.get("Telephone") or "N/A").strip()
+                addr = str(row.get("Residential Address") or "N/A").strip()
+                if name and mid:
+                    formatted = f"{name} — Medical ID-{mid} | Telephone Number- {phone} | Residential Address- {addr}"
+                    candidates.append(formatted)
+    except Exception as e:
+        print("Excel search error:", e)
+
+    # SQL
+    try:
+        sql_df = read_cloud_sql(person_input)
+        sql_df = normalize_columns(sql_df)
+        for _, row in sql_df.iterrows():
+            name = str(row.get("youth_name") or "").strip()
+            mid = str(row.get("medical_id_number") or "").strip()
+            phone = str(row.get("telephone") or "N/A").strip()
+            addr = str(row.get("residential_address") or "N/A").strip()
+            if name and mid:
+                formatted = f"{name} — Medical ID-{mid} | Telephone Number- {phone} | Residential Address- {addr}"
+                candidates.append(formatted)
+    except Exception as e:
+        print("SQL search error:", e)
+
+    # BigQuery
+    try:
+        bq_df = read_bigquery(person_input)
+        bq_df = normalize_columns(bq_df)
+        for _, row in bq_df.iterrows():
+            name = str(row.get("youth_name") or "").strip()
+            mid = str(row.get("medical_id_number") or "").strip()
+            phone = str(row.get("telephone") or "N/A").strip()
+            addr = str(row.get("residential_address") or "N/A").strip()
+            if name and mid:
+                formatted = f"{name} — Medical ID-{mid} | Telephone Number- {phone} | Residential Address- {addr}"
+                candidates.append(formatted)
+    except Exception as e:
+        print("BigQuery search error:", e)
+
+    # Deduplicate by Medical ID (Excel → SQL → BigQuery priority)
+    unique = {}
+    for entry in candidates:
+        match = re.search(r"Medical ID-(\d+)", entry)
+        if match:
+            mid = match.group(1)
+            if mid not in unique:
+                unique[mid] = entry
+
+    return list(unique.values())
+
 
 # ✅ BigQuery client
 client = bigquery.Client()
@@ -119,137 +272,117 @@ def force_document_font(doc, name="Century Gothic"):
 # -------------------------------------------------------------------------
 
 
-def generate_reentry_care_plan(selected_fields, person_input):
-    """
-    Fetches data from Excel, Cloud SQL, and BigQuery,
-    merges it based on selected fields, and returns a BytesIO Word document.
-    Also saves a copy to data/reentry_output.docx
-    """
+def generate_reentry_care_plan(selected_fields, person_input, app_option):
+        
+
+    text = "John Doe — Medical ID-5952280034 | Telephone Number- (555) 271-3237 | Residential Address- 134 Brown St, Los Angeles, CA 90063"
+
+    # Regex patterns
+    name_pattern = r"^(.*?)\s+—"
+    medical_id_pattern = r"Medical ID-(\d+)"
+
+    # Extract values
+    name_match = re.search(name_pattern, text)
+    medical_id_match = re.search(medical_id_pattern, text)
+
+    if name_match and medical_id_match:
+        name = name_match.group(1)
+        medical_id = medical_id_match.group(1)
     try:
-        # ✅ Fetch Excel data
-        file_data = pd.read_excel("ExcelFiles/row_1.xlsx")
-        excel_dict = file_data.to_dict(orient='records')[0]
+        selected_fields = normalize_selected_fields(selected_fields)
 
-        # ✅ Fetch SQL + BigQuery Data
-        sql_record = read_cloud_sql(person_input)
-        bq_record = read_bigquery(person_input)
+        # Excel
+        file_data = pd.read_excel("ExcelFiles/reentry5.xlsx")
+        file_data = normalize_columns(file_data)
 
-        # ✅ Rename SQL columns for consistency
-        sql_record = sql_record.rename(columns={
-            'youth_name': 'Name of the youth',
-            'medical_id_number': 'Medical ID Number',
-            'actual_release_date': 'Actual release date',
-            'scheduled_appointments': 'Scheduled Appointments',
-            'housing': 'Housing',
-            'employment': 'Employment',
-            'income_and_benefits': 'Income and benefits',
-            'food_and_clothing': 'Food & Clothing',
-            'transportation': 'Transportation',
-            'identification_documents': 'Identification documents',
-            'life_skills': 'Life skills',
-            'family_and_children': 'Family and children',
-            'court_dates': 'Court dates',
-            'service_referrals': 'Service referrals',
-            'home_modifications': 'Home Modifications',
-            'durable_medical_equipment': 'Durable Medical Equipment',
-            'case_notes': 'Case Notes'
-        })
+        if medical_id and "Medical ID Number" in file_data.columns:
+            person_row = file_data[file_data["Medical ID Number"].astype(str) == str(medical_id)]
+        else:
+            person_row = file_data[file_data.get("Name of the youth", pd.Series(dtype=str)) == person_input]
 
-        sql_dict = sql_record.to_dict(orient='records')[0] if not sql_record.empty else {}
-        bq_dict = bq_record.to_dict(orient='records')[0] if not bq_record.empty else {}
+        dict_representation = person_row.to_dict(orient="records")[0] if not person_row.empty else {}
 
-        # ✅ Merge precedence: Excel < SQL < BigQuery
-        merged_dict = {**excel_dict, **sql_dict, **bq_dict}
-        merged_dict.pop('id', None)
+        # SQL + BigQuery
+        sql_record = read_cloud_sql(person_input, medical_id)
+        sql_record = normalize_columns(sql_record)
 
-        print("FINAL MERGED DATA - ", merged_dict)
-        print("\n🔑 Keys in merged_dict:", list(merged_dict.keys()))
-        print("📋 Selected fields:", selected_fields)
+        bq_record = read_bigquery(person_input, medical_id)
+        bq_record = normalize_columns(bq_record)
 
-        # ✅ Save to template
-        source_file = "data/Template.docx"
-        destination_file = "data/reentry_output.docx"
-        shutil.copy(source_file, destination_file)
+        # Convert to dicts
+        sql_dict = (sql_record.to_dict(orient="records")[0]
+                    if isinstance(sql_record, pd.DataFrame) and not sql_record.empty else {})
+        bq_dict = (bq_record.to_dict(orient="records")[0]
+                   if isinstance(bq_record, pd.DataFrame) and not bq_record.empty else {})
 
-        doc = Document(destination_file)
+        # Merge dictionaries (Excel → SQL → BQ priority)
+        merged_dict = {}
+        merged_dict.update(dict_representation)
+        merged_dict.update(sql_dict)
+        merged_dict.update(bq_dict)
+        merged_dict.pop("id", None)
 
-        # 🔤 Ensure the entire document uses Century Gothic up front
-        force_document_font(doc, name="Century Gothic")
+        # ✅ Load Template instead of starting fresh
+        doc = Document("D:\Application\data\Template.docx")
 
         # Title
-        title_paragraph = doc.add_paragraph(f"{person_input}'s Reentry Care Plan")
-        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_run = title_paragraph.runs[0]
-        title_run.bold = True
-        _set_run_font(title_run, name="Century Gothic", size_pt=16, color_rgb=(0, 0, 0))
+        doc.add_paragraph("")
+        title_text = f"{person_input}'s Reentry Care Plan"
+        doc_title = doc.add_paragraph(title_text)
+        doc_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if doc_title.runs:
+            run = doc_title.runs[0]
+            run.bold = True
+            run.font.color.rgb = RGBColor(0, 0, 0)
 
         doc.add_paragraph("")
 
-        # ✅ Main Info Table
+        # Table of all fields
+        all_possible_fields = [f for f in dict.fromkeys(CANON_MAP.values()) if f != "Case Notes"]
+
         table = doc.add_table(rows=1, cols=2)
+        
 
-        try:
-            table.style = "Table Grid"
-        except KeyError:
-            pass  # no style in template, keep default
+# apply borders directly (XML hack inline)
+        tbl = table._tbl
+        tblBorders = OxmlElement('w:tblBorders')
+        for border_name in ["top", "left", "bottom", "right", "insideH", "insideV"]:
+            border = OxmlElement(f'w:{border_name}')
+            border.set(qn('w:val'), 'single')
+            border.set(qn('w:sz'), '8')     # thickness
+            border.set(qn('w:space'), '0')
+            border.set(qn('w:color'), '000000')  # black
+            tblBorders.append(border)
+        tbl.tblPr.append(tblBorders)
 
-        # Apply custom borders if no style
-        set_table_borders(table)
 
         hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'Data Field Name'
-        hdr_cells[1].text = 'Value'
+        hdr_cells[0].text = "Field"
+        hdr_cells[1].text = "Value"
 
-        # ✅ Style header text (bold, size, and font)
-        for cell in hdr_cells:
-            for paragraph in cell.paragraphs:
-                for run in paragraph.runs:
-                    run.font.bold = True
-                    _set_run_font(run, name="Century Gothic", size_pt=12, color_rgb=(0, 0, 0))
-
-        # ✅ Normalize keys (case-insensitive lookup)
-        normalized_dict = {k.strip().lower(): v for k, v in merged_dict.items()}
-
-        for key in selected_fields:
-            # Remove suffix like " (CM)" if present
-            clean_key = key.split(" (")[0].strip()
-            actual_key = FIELD_MAP.get(clean_key, clean_key)  # map UI → DB field
-            lookup_key = actual_key.strip().lower()
-
-            value = normalized_dict.get(lookup_key, "Not Available")
+        for key in all_possible_fields:
+            if key in selected_fields:
+                value = merged_dict.get(key, "Not Available")
+            else:
+                value = "Not Selected"
 
             row_cells = table.add_row().cells
-            row_cells[0].text = str(actual_key)
-            row_cells[1].text = str(value)
+            row_cells[0].text = str(key)
+            row_cells[1].text = "" if pd.isna(value) else str(value)
 
-            # Enforce Century Gothic on the new row
-            for c in row_cells:
-                for p in c.paragraphs:
-                    for run in p.runs:
-                        _set_run_font(run, name="Century Gothic")
-
-        # ✅ Append Case Notes at the end if not already added
-        if "Case Notes" not in [FIELD_MAP.get(k.split(" (")[0].strip(), k) for k in selected_fields]:
-            case_notes = sql_dict.get("Case Notes", bq_dict.get("Case Notes", "No case notes available."))
+        # Case Notes
+        # Case Notes → only if selected
+        if "Case Notes" in selected_fields:
+            case_notes_value = get_case_notes(sql_dict, bq_dict, dict_representation)
             row_cells = table.add_row().cells
             row_cells[0].text = "Case Notes"
-            row_cells[1].text = str(case_notes).strip()
-            for c in row_cells:
-                for p in c.paragraphs:
-                    for run in p.runs:
-                        _set_run_font(run, name="Century Gothic")
+            row_cells[1].text = "" if pd.isna(case_notes_value) else str(case_notes_value).strip()
 
-        # Final sweep in case the template had leftover styles
-        force_document_font(doc, name="Century Gothic")
 
-        # ✅ Save both to disk and to memory
-        doc.save(destination_file)  # Save permanent copy on disk
-
+        # Save as BytesIO
         doc_io = BytesIO()
         doc.save(doc_io)
         doc_io.seek(0)
-
-        print(f"✅ Reentry Care Plan saved at {destination_file}")
         return doc_io
 
     except Exception as e:
@@ -258,37 +391,45 @@ def generate_reentry_care_plan(selected_fields, person_input):
         return None
 
 
-def read_cloud_sql(person_input):
-    # ✅ Connection parameters
+def read_cloud_sql(person_input, medical_id=None):
     user = os.environ["CLOUD_SQL_USER"]
     password = os.environ["CLOUD_SQL_PASSWORD"]
     host = os.environ["CLOUD_SQL_HOST"]
-    database = 'serrano'
+    database = "serrano"
 
     connection_url = f"mysql+pymysql://{user}:{password}@{host}/{database}"
     engine = create_engine(connection_url)
 
-    query = f"SELECT * FROM SocialEconomicLogistics_backup WHERE youth_name='{person_input}'"
+    if medical_id:
+        query = f"SELECT * FROM SocialEconomicLogistics_backup WHERE medical_id_number='{medical_id}'"
+    else:
+        query = f"SELECT * FROM SocialEconomicLogistics_backup WHERE youth_name='{person_input}'"
+
     df = pd.read_sql(query, engine)
     return df
 
-
-def read_bigquery(person_input):
-    query = """
-        SELECT * 
-        FROM `genai-poc-424806.SerranoAdvisorsBQ.scalablefeaturesforBQ`
-        WHERE youth_name = @name
-    """
-
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("name", "STRING", person_input)
-        ]
-    )
+def read_bigquery(person_input, medical_id=None):
+    if medical_id:
+        query = """
+            SELECT *
+            FROM genai-poc-424806.SerranoAdvisorsBQ.scalablefeaturesforBQ
+            WHERE medical_id_number = @mid
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("mid", "STRING", str(medical_id))]
+        )
+    else:
+        query = """
+            SELECT *
+            FROM genai-poc-424806.SerranoAdvisorsBQ.scalablefeaturesforBQ
+            WHERE youth_name = @name
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", person_input)]
+        )
 
     df = client.query(query, job_config=job_config).to_dataframe()
     return df
-
 
 # ✅ DB CONFIG
 DB_CONFIG = {

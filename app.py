@@ -4,7 +4,7 @@ import io
 import os
 import shutil
 from src.model import openai_model_with_mcp_tools
-from src.reentry_care_plan import generate_reentry_care_plan
+from src.reentry_care_plan import generate_reentry_care_plan, get_candidates_by_name
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -40,27 +40,82 @@ def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'message': 'Backend is running'})
 
+# Get candidates by name endpoint
+@app.route('/get_candidates_by_name', methods=['POST'])
+def get_candidates_endpoint():
+    """Get all candidate profiles for a given name"""
+    print("\n=== GET_CANDIDATES_BY_NAME ENDPOINT ===")
+    try:
+        data = request.get_json()
+        print(f"📥 INPUT: {data}")
+        candidate_name = data.get('candidate_name', '').strip()
+        
+        if not candidate_name:
+            print("❌ ERROR: No candidate name provided")
+            return jsonify({'error': 'Candidate name is required'}), 400
+        
+        print(f"🔍 SEARCHING for candidates with name: '{candidate_name}'")
+        
+        # Call the utility function
+        print("🔧 CALLING get_candidates_by_name()...")
+        candidates = get_candidates_by_name(candidate_name)
+        print(f"📊 FOUND {len(candidates)} candidates: {candidates}")
+        
+        # Format response
+        profiles = []
+        for name, medical_id in candidates:
+            profiles.append({
+                'name': name,
+                'medical_id': medical_id,
+                'display_text': f"{name} (ID: {medical_id})"
+            })
+        
+        result = {
+            'success': True,
+            'candidates': profiles,
+            'count': len(profiles)
+        }
+        print(f"📤 OUTPUT: {result}")
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"❌ ERROR in get_candidates_endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        print("=== END GET_CANDIDATES_BY_NAME ===")
+
 # Reentry Care Plan endpoint
 @app.route('/generate_reentry_care_plan', methods=['POST'])
 def generate_reentry_endpoint():
     """Handle Reentry Care Plan generation"""
+    print("\n=== GENERATE_REENTRY_CARE_PLAN ENDPOINT ===")
     try:
         data = request.get_json()
+        print(f"📥 INPUT: {data}")
         selected_fields = data.get('selected_fields', [])
         candidate_name = data.get('candidate_name', '')
+        selected_profile = data.get('selected_profile', '')
         
         if not candidate_name:
+            print("❌ ERROR: No candidate name provided")
             return jsonify({'error': 'Candidate name is required'}), 400
         
         if not selected_fields:
+            print("❌ ERROR: No fields selected")
             return jsonify({'error': 'At least one field must be selected'}), 400
         
-        print(f"Generating Reentry Care Plan for {candidate_name} with fields: {selected_fields}")
+        print(f"🏗️ GENERATING Reentry Care Plan for '{candidate_name}'")
+        print(f"📋 SELECTED FIELDS ({len(selected_fields)}): {selected_fields}")
+        if selected_profile:
+            print(f"👤 SELECTED PROFILE: {selected_profile}")
         
         # Call your existing reentry function
+        print("🔧 CALLING generate_reentry_care_plan()...")
         doc_io = generate_reentry_care_plan(selected_fields, candidate_name)
+        print("📄 DOCUMENT generated successfully")
         
         if doc_io is None:
+            print("❌ ERROR: Document generation failed")
             return jsonify({'error': 'Failed to generate care plan'}), 500
         
         # Save the document to a file for download
@@ -69,16 +124,20 @@ def generate_reentry_endpoint():
             f.write(doc_io.getvalue())
         
         # Return the file for download
+        filename = f"{candidate_name}_reentry_care_plan.docx"
+        print(f"📤 SENDING FILE: {filename}")
         return send_file(
             output_path,
             as_attachment=True,
-            download_name=f"{candidate_name}_reentry_care_plan.docx",
+            download_name=filename,
             mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         )
         
     except Exception as e:
-        print(f"Error in reentry endpoint: {e}")
+        print(f"❌ ERROR in reentry endpoint: {e}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        print("=== END GENERATE_REENTRY_CARE_PLAN ===")
 
 # Adult Health Risk Assessment endpoint
 @app.route('/generate_hra_adult', methods=['POST'])
@@ -185,24 +244,24 @@ def internal_error(error):
     """Handle 500 errors"""
     return jsonify({'error': 'Internal server error'}), 500
 
-if __name__ == '__main__':
-    # Ensure data directory exists
-    os.makedirs('data', exist_ok=True)
-    os.makedirs('image', exist_ok=True)
-    
-    # Get port from environment variable (for Cloud Run compatibility)
-    port = int(os.environ.get('PORT', 8080))
-    
-    # Run the application (production settings)
-    app.run(debug=False, host='0.0.0.0', port=port)
-
 # if __name__ == '__main__':
 #     # Ensure data directory exists
 #     os.makedirs('data', exist_ok=True)
-#     os.makedirs('image', exist_ok=True)  # Ensure image directory exists
+#     os.makedirs('image', exist_ok=True)
     
 #     # Get port from environment variable (for Cloud Run compatibility)
-#     port = int(os.environ.get('PORT', 5000))
+#     port = int(os.environ.get('PORT', 8080))
     
-#     # Run the application
-#     app.run(debug=True, host='0.0.0.0', port=port)
+#     # Run the application (production settings)
+#     app.run(debug=False, host='0.0.0.0', port=port)
+
+if __name__ == '__main__':
+    # Ensure data directory exists
+    os.makedirs('data', exist_ok=True)
+    os.makedirs('image', exist_ok=True)  # Ensure image directory exists
+    
+    # Get port from environment variable (for Cloud Run compatibility)
+    port = int(os.environ.get('PORT', 5000))
+    
+    # Run the application
+    app.run(debug=True, host='0.0.0.0', port=port)

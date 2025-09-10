@@ -8,8 +8,14 @@ import json
 import ast
 
 def openai_model_with_mcp_tools(selected_tables, candidate):
+    print(f"\n🤖 OPENAI MODEL CALLED")
+    print(f"📂 SELECTED TABLES: {selected_tables}")
+    print(f"👤 CANDIDATE: {candidate}")
+    
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     user_input = f"I need full data for: {candidate} from following tables only: {', '.join(selected_tables)} as JSON, don't include duplicate records across tables."
+    print(f"📝 USER INPUT: {user_input}")
+    print("🚀 CALLING OpenAI API...")
     response = client.responses.create(
     model="gpt-5",
     input=[
@@ -77,19 +83,26 @@ def openai_model_with_mcp_tools(selected_tables, candidate):
         "web_search_call.action.sources"
     ]
     )
-    print(f"Response: {response.output_text}")
+    print(f"🤖 AI RESPONSE: {response.output_text[:200]}...")  # First 200 chars
+    print(f"🤖 FULL RESPONSE LENGTH: {len(response.output_text)} characters")
+    print("🔍 SEARCHING for JSON in response...")
     match = re.search(r'\{[\s\S]*\}', response.output_text)
     if match:
         json_data = match.group(0)
+        print(f"✅ JSON FOUND: {len(json_data)} characters")
         try:
             input_json = ast.literal_eval(json_data)  # ✅ handles Python booleans/None
-            print(f"Extracted JSON: {input_json}")
+            print(f"✅ JSON PARSED successfully: {len(input_json)} top-level keys")
+            print(f"🔑 JSON KEYS: {list(input_json.keys())[:10]}...")  # First 10 keys
+            print("🔧 CALLING json_to_docx_append_vertical_tables()...")
             json_to_docx_append_vertical_tables(input_json)
+            print("✅ DOCUMENT PROCESSING completed")
             return input_json
         except Exception as e:
-            print(f"Error parsing assistant output: {e}")
+            print(f"❌ ERROR parsing JSON: {e}")
             return response.output_text
     else:
+        print("❌ NO JSON found in response")
         return response.output_text
 
 

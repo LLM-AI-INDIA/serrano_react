@@ -143,14 +143,6 @@ const GENERIC_SECTIONS = [
   { title: "General", tables: ["field_1", "field_2"] },
 ];
 
-const COUNTIES = [
-  "Alameda", "Alpine", "Amador", "Butte", "Calaveras", "Colusa", "Contra Costa", "Del Norte", "El Dorado", "Fresno", 
-  "Glenn", "Humboldt", "Imperial", "Inyo", "Kern", "Kings", "Lake", "Lassen", "Los Angeles", "Madera", "Marin", 
-  "Mariposa", "Mendocino", "Merced", "Modoc", "Mono", "Monterey", "Napa", "Nevada", "Orange", "Placer", "Plumas", 
-  "Riverside", "Sacramento", "San Benito", "San Bernardino", "San Diego", "San Francisco", "San Joaquin", 
-  "San Luis Obispo", "San Mateo", "Santa Barbara", "Santa Clara", "Santa Cruz", "Shasta", "Sierra", "Siskiyou", 
-  "Solano", "Sonoma", "Stanislaus", "Sutter", "Tehama", "Trinity", "Tulare", "Tuolumne", "Ventura", "Yolo", "Yuba"
-];
 
 // Candidate pools
 const REENTRY_CANDIDATES = [
@@ -362,8 +354,10 @@ function SuccessAlert({ message, onClose }) {
 function ReentryCarePlanUI() {
   const [activeStep, setActiveStep] = useState(0);
   const [assessmentType, setAssessmentType] = useState("");
-  const [county, setCounty] = useState("");
   const [candidateName, setCandidateName] = useState('');
+  const [candidateProfiles, setCandidateProfiles] = useState([]);
+  const [selectedProfile, setSelectedProfile] = useState('');
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [schemaQuery, setSchemaQuery] = useState("");
   const [checked, setChecked] = useState({});
   const [loading, setLoading] = useState(false);
@@ -408,15 +402,16 @@ function ReentryCarePlanUI() {
 
   // Reset fields on step/type change
   useEffect(() => {
-    setCounty("");
     setCandidateName("");
+    setCandidateProfiles([]);
+    setSelectedProfile("");
   }, [activeStep, assessmentType]);
 
   // Clear messages when context changes
   useEffect(() => {
     setError("");
     setSuccess("");
-  }, [activeStep, assessmentType, candidateName, county]);
+  }, [activeStep, assessmentType, candidateName, selectedProfile]);
 
   const allFieldIds = useMemo(() => 
     filteredTemplate.flatMap((p) => p.fields.map((f) => f.id)), 
@@ -427,6 +422,72 @@ function ReentryCarePlanUI() {
   
   const toggleAll = (next) => setChecked(Object.fromEntries(allFieldIds.map((id) => [id, next])));
   const toggle = (id) => setChecked((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  // Handle profile selection - update candidate name when profile is selected
+  const handleProfileSelection = (medicalId) => {
+    setSelectedProfile(medicalId);
+    if (medicalId) {
+      const selectedProfileData = candidateProfiles.find(profile => profile.medical_id === medicalId);
+      if (selectedProfileData) {
+        // Update candidate name to full display text including ID
+        setCandidateName(selectedProfileData.display_text);
+      }
+    }
+  };
+
+  // Fetch candidate profiles when candidate name changes (only for Reentry Care Plan)
+  useEffect(() => {
+    const fetchCandidates = async () => {
+      // Only fetch candidates for Reentry Care Plan
+      if (STEPS[activeStep] !== "Reentry Care Plan" || !candidateName.trim()) {
+        setCandidateProfiles([]);
+        setSelectedProfile("");
+        return;
+      }
+
+      try {
+        setLoadingProfiles(true);
+        setError("");
+        
+        const response = await fetch("http://localhost:5000/get_candidates_by_name", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidate_name: candidateName }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: `Server error: ${response.status}` }));
+          throw new Error(errorData.error || `Server error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const profiles = data.candidates || [];
+        setCandidateProfiles(profiles);
+        
+        // Auto-select if only one profile found
+        if (profiles.length === 1) {
+          setSelectedProfile(profiles[0].medical_id);
+          // Update candidate name to full display text including ID
+          setCandidateName(profiles[0].display_text);
+        } else {
+          setSelectedProfile(""); // Reset selection when multiple profiles loaded
+          // Don't update candidate name here - keep user input until they select
+        }
+        
+      } catch (err) {
+        console.error("Error fetching candidates:", err);
+        setError(`Failed to fetch candidate profiles: ${err.message}`);
+        setCandidateProfiles([]);
+        setSelectedProfile("");
+      } finally {
+        setLoadingProfiles(false);
+      }
+    };
+
+    // Debounce the API call
+    const timeoutId = setTimeout(fetchCandidates, 500);
+    return () => clearTimeout(timeoutId);
+  }, [candidateName, activeStep]);
 
   async function generate() {
     setError("");
@@ -446,6 +507,12 @@ function ReentryCarePlanUI() {
         setError("Please choose or enter a candidate name.");
         return;
     }
+    
+    // If multiple profiles are available and we're in Reentry Care Plan, ensure one is selected
+    if (STEPS[activeStep] === "Reentry Care Plan" && candidateProfiles.length > 1 && !selectedProfile) {
+        setError("Please select a correct profile from the list.");
+        return;
+    }
 
     try {
       setLoading(true);
@@ -454,7 +521,8 @@ function ReentryCarePlanUI() {
       let filename = "";
       
       if (step === "Reentry Care Plan") {
-        endpoint = "/generate_reentry_care_plan";
+        endpoint = "http://localhost:5000/generate_reentry_care_plan";
+        // endpoint = "/generate_reentry_care_plan";
         filename = `${finalCandidateName}_reentry_care_plan.docx`;
       } else if (step === "Health Risk Assessment") {
         if (!assessmentType) {
@@ -463,10 +531,12 @@ function ReentryCarePlanUI() {
         }
         
         if (assessmentType === "Adult_Receiving_Screening") {
-          endpoint = "/generate_hra_adult";
+          endpoint = "http://localhost:5000/generate_hra_adult";
+          // endpoint = "/generate_hra_adult";
           filename = `${finalCandidateName}_adult_hra.docx`;
         } else if (assessmentType === "Juvenile_MH_Screening") {
-          endpoint = "/generate_hra_juvenile";
+          endpoint = "http://localhost:5000/generate_hra_juvenile";
+          // endpoint = "/generate_hra_juvenile";
           filename = `${finalCandidateName}_juvenile_hra.docx`;
         } else {
           setError("Unknown assessment type selected.");
@@ -483,7 +553,7 @@ function ReentryCarePlanUI() {
         body: JSON.stringify({ 
           selected_fields: selectedFields, 
           candidate_name: finalCandidateName,
-          county: county
+          selected_profile: selectedProfile
         }),
       });
 
@@ -555,7 +625,7 @@ function ReentryCarePlanUI() {
 
           {/* HRA controls */}
           {STEPS[activeStep] === "Health Risk Assessment" && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Assessment Type</label>
                 <select
@@ -569,17 +639,6 @@ function ReentryCarePlanUI() {
                 </select>
               </div>
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Select County (Optional)</label>
-                <select
-                  value={county}
-                  onChange={(e) => setCounty(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-800 shadow focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">Choose...</option>
-                  {COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Candidate</label>
                 <CandidateSelect list={candidatePool} value={candidateName} onChange={setCandidateName} />
               </div>
@@ -589,21 +648,47 @@ function ReentryCarePlanUI() {
           {/* Reentry controls */}
           {STEPS[activeStep] === "Reentry Care Plan" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Select County (Optional)</label>
-                <select
-                  value={county}
-                  onChange={(e) => setCounty(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-800 shadow focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">Choose...</option>
-                  {COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Candidate</label>
                 <CandidateSelect list={candidatePool} value={candidateName} onChange={setCandidateName} />
               </div>
+              {candidateName.trim() && candidateProfiles.length > 1 && (
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    Select Correct Profile ({candidateProfiles.length} found)
+                    {loadingProfiles && <span className="text-xs text-gray-500 ml-1">(Loading...)</span>}
+                  </label>
+                  <select
+                    value={selectedProfile}
+                    onChange={(e) => handleProfileSelection(e.target.value)}
+                    disabled={loadingProfiles}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-800 shadow focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
+                    <option value="">Choose profile...</option>
+                    {candidateProfiles.map((profile, index) => (
+                      <option key={index} value={profile.medical_id}>
+                        {profile.display_text}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {candidateName.trim() && candidateProfiles.length === 1 && (
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Profile Status</label>
+                  <div className="w-full rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-green-800">
+                    ✓ Single profile found and selected: {candidateProfiles[0].display_text}
+                  </div>
+                </div>
+              )}
+              {candidateName.trim() && !loadingProfiles && candidateProfiles.length === 0 && (
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Profile Status</label>
+                  <div className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600">
+                    No profiles found in database - using entered name
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
